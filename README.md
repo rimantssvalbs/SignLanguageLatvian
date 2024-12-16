@@ -17,3 +17,7 @@ Application Development:
 
 Created a user-friendly application that converts recognized gestures into Latvian text.
 Evaluated the software's functionality and user experience for optimal performance.
+
+
+https://github.com/user-attachments/assets/ada60e14-d8ad-40a0-8c67-9fc120730e11
+
