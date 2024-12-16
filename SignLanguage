@@ -1,0 +1,637 @@
+import cv2
+import customtkinter as ctk
+import tkinter as tki
+from tkinter import *
+import tkinter.messagebox
+from tkinter.filedialog import asksaveasfilename, askopenfilename, askdirectory
+import threading
+from PIL import Image
+from PIL import ImageTk
+from cvzone.ClassificationModule import Classifier
+import numpy as np
+import math
+from collections import OrderedDict
+from operator import getitem
+import imutils
+from cvzone.HandTrackingModule import HandDetector
+import time
+from keras.models import load_model
+from datetime import datetime
+
+rokas_parbaude = HandDetector(maxHands=1)
+klasifikacija = Classifier("Models/keras_model.h5", "Models/labels.txt")
+
+loaded_model = load_model('Models/my_model.h5')
+
+spec_nosaukumi = {
+    'A_special': 0,
+    'C_special': 1,
+    'D': 2,
+    'E_special': 3,
+    'G_special': 4,
+    'I_special': 5,
+    'J': 6,
+    'K_special': 7,
+    'L_special': 8,
+    'N_special': 9,
+    'S': 10,
+    'Š': 11,
+    'U_special': 12,
+    'Z_special': 13
+}
+
+burt_rev = {}
+
+for key, value in spec_nosaukumi.items():
+    burt_rev[value] = key
+
+
+def crop_img(img):
+    metode_1 = cv2.inRange(img, np.array([0, 0, 200]), np.array([0, 0, 255]))
+    metode_2 = np.ones((5, 5), np.uint8)
+    metode_3 = cv2.morphologyEx(metode_1, cv2.MORPH_CLOSE, metode_2)
+    apgriezt_1 = cv2.bitwise_and(img, img, mask=metode_3)
+
+    pelektonis = cv2.cvtColor(apgriezt_1, cv2.COLOR_BGR2GRAY)
+    aizmiglot_1 = cv2.GaussianBlur(pelektonis, (5, 5), 0)
+    threshold = cv2.threshold(aizmiglot_1, 0, 255, cv2.THRESH_BINARY)[1]
+    konturas = cv2.findContours(threshold.copy(), cv2.RETR_EXTERNAL,cv2.CHAIN_APPROX_SIMPLE)
+    konturas = imutils.grab_contours(konturas)
+    min_x = 10000
+    min_y = 10000
+
+    max_x = 0
+    max_y = 0
+    if (len(konturas) != 0):
+
+        for rinda in konturas:
+
+            kvadrats_1 = cv2.minAreaRect(rinda)
+            kvadrats_2 = cv2.boxPoints(kvadrats_1)
+            for punkti in kvadrats_2:
+                if min_x > punkti[0]:
+                    min_x = punkti[0]
+                    min_x = max(0, min_x)
+                if min_y > punkti[1]:
+                    min_y = punkti[1]
+                    min_y = max(min_y, 0)
+
+                if max_x < punkti[0]:
+                    max_x = punkti[0]
+                if max_y < punkti[1]:
+                    max_y = punkti[1]
+    print(min_y, max_y, min_x, max_x)
+    apgriezt_2 = threshold[int(min_y):int(max_y), int(min_x):int(max_x)]
+    try:
+        apgriezt_2 = cv2.resize(apgriezt_2, (28, 28))
+        return apgriezt_2
+    except:
+        return None
+
+
+##############################################################################################
+
+burtu_nosaukumi = [
+    "A", "B", "C", "E", "F", "G", "H", "I", "K", "L", "M", "N", "O", "P", "R",
+    "T", "U", "V", "Z", "SPACE", "DELETE_GEST"
+]
+
+burtu_rez = {
+    "A": {"score": 0, "x_pos": [], "y_pos": []},
+    "B": {"score": 0, "x_pos": [], "y_pos": []},
+    "C": {"score": 0, "x_pos": [], "y_pos": []},
+    "E": {"score": 0, "x_pos": [], "y_pos": []},
+    "F": {"score": 0, "x_pos": [], "y_pos": []},
+    "H": {"score": 0, "x_pos": [], "y_pos": []},
+    "G": {"score": 0, "x_pos": [], "y_pos": []},
+    "I": {"score": 0, "x_pos": [], "y_pos": []},
+    "L": {"score": 0, "x_pos": [], "y_pos": []},
+    "M": {"score": 0, "x_pos": [], "y_pos": []},
+    "N": {"score": 0, "x_pos": [], "y_pos": []},
+    "O": {"score": 0, "x_pos": [], "y_pos": []},
+    "P": {"score": 0, "x_pos": [], "y_pos": []},
+    "R": {"score": 0, "x_pos": [], "y_pos": []},
+    "U": {"score": 0, "x_pos": [], "y_pos": []},
+    "V": {"score": 0, "x_pos": [], "y_pos": []},
+    "Z": {"score": 0, "x_pos": [], "y_pos": []},
+    "K": {"score": 0, "x_pos": [], "y_pos": []},
+    "T": {"score": 0, "x_pos": [], "y_pos": []},
+    "SPACE": {"score": 0, "x_pos": [], "y_pos": []},
+    "DELETE_GEST": {"score": 0, "x_pos": [], "y_pos": []},
+}
+
+spec_burti = {
+    "A": "Ā", "C": "Č", "E": "Ē", "G": "Ģ",
+    "I": "Ī", "L": "Ļ", "N": "Ņ", "U": "Ū",
+    "Z": "Ž", "K": "Ķ"
+}
+
+
+nobide = 20
+attela_robezas = 300
+
+counter = 0
+
+Saraksts_1 = [[]]
+Sar_main = -1
+Saraksts_2 = False
+t1 = None
+laiks_1 = 0
+laiks_2 = 0
+t2 = None
+rezultfin = ""
+
+ctk.set_appearance_mode("dark")
+ctk.set_default_color_theme("blue")
+
+
+class Aplikacija_Class:
+    def __init__(self):
+        self.root = ctk.CTk()
+        self.root.title("Latvian Sign Language")
+        self.root.geometry("1120x700+50+0")
+        self.root.resizable(0, 0)
+
+        self.mytextbox = ctk.CTkTextbox(self.root, width=140, height=20, corner_radius=0)
+        self.mytextbox1 = ctk.CTkTextbox(self.root, width=135, height=20, corner_radius=0)
+        self.mytextbox2 = ctk.CTkTextbox(self.root, width=500, height=20, corner_radius=0)
+
+
+        #####################################################################################################
+        self.Printed_Text = ctk.CTkTextbox(self.root, width=180, height=50, corner_radius=0)
+        self.Printed_Text.place(x=110, y=550)
+        #####################################################################################################
+
+
+
+        label1 = ctk.CTkLabel(self.root, text='Izvēlieties Kameru', font=ctk.CTkFont(size=18, weight="bold")).place(
+            x=900, y=30)
+
+        camList = self.chooseCamera()
+        camList.reverse()
+
+        self.option1 = ctk.CTkOptionMenu(self.root, width=100, height=40, font=ctk.CTkFont(size=14, weight="bold"),
+                                         values=camList)
+        self.option1.place(x=925, y=70)
+
+        self.buttonExit = ctk.CTkButton(self.root, text="Iziet", width=90, height=40,
+                                        command=lambda: [self.exitProgram()],
+                                        font=ctk.CTkFont(size=14, weight="bold"))
+        self.buttonExit.place(x=1020, y=650)
+
+
+
+        self.buttonStart = ctk.CTkButton(self.root, text="Sākt", width=70, height=40,
+                                         command=lambda: [self.startvideo(), self.startText()],
+                                         font=ctk.CTkFont(size=14, weight="bold"))
+        self.buttonStart.place(x=900, y=150)
+
+        self.buttonStop = ctk.CTkButton(self.root, text="Apturēt", width=70, height=40,
+                                        font=ctk.CTkFont(size=14, weight="bold"),
+                                        command=lambda: [self.stopVideo(), self.stopText()])
+        self.buttonStop.place(x=980, y=150)
+
+        self.impVideo = ctk.CTkButton(self.root, text="Importēt Video", width=70, height=40,
+                                      command=lambda: [self.OpenFile(), self.pathText()],
+                                      font=ctk.CTkFont(size=14, weight="bold"))
+        self.impVideo.place(x=919, y=200)
+
+        path = r'C:\Users\Rimants\PycharmProjects\realproject\Models\Grey_full.png'
+
+
+        self.attels = cv2.imread(path)
+
+        self.attels = cv2.resize(self.attels, (700, 466))
+        self.attels = cv2.cvtColor(self.attels, cv2.COLOR_BGR2RGB)
+
+        self.attels = Image.fromarray(self.attels)
+        self.attels = ImageTk.PhotoImage(self.attels)
+
+        self.panelis = tki.Label(image=self.attels)
+        self.panelis.image = self.attels
+        self.panelis.place(x=110, y=70, width=630, height=466)
+
+
+    def exitProgram(self):
+        self.root.destroy()
+
+    def startText(self):
+        self.mytextbox1.delete("1.0", "end")
+        self.mytextbox2.delete("1.0", "end")
+        self.mytextbox1.place_forget()
+        self.mytextbox2.place_forget()
+        self.mytextbox.place(x=110, y=35)
+        self.mytextbox.insert("0.0", "Start button pressed")
+
+    def stopText(self):
+        self.mytextbox.delete("1.0", "end")
+        self.mytextbox2.delete("1.0", "end")
+        self.mytextbox.place_forget()
+        self.mytextbox2.place_forget()
+        self.mytextbox1.place(x=110, y=35)
+        self.mytextbox1.insert("0.0", "Stop button pressed")
+
+    def pathText(self):
+        self.mytextbox1.delete("1.0", "end")
+        self.mytextbox.delete("1.0", "end")
+        self.mytextbox1.place_forget()
+        self.mytextbox.place_forget()
+        self.mytextbox2.place(x=110, y=35)
+        self.mytextbox2.insert("0.0", "Video File Path: " + vidname)
+
+    def startvideo(self):
+
+        global vidname
+        camid = str(self.option1.get())
+
+        self.panelis = tki.Label(image=self.attels)
+        self.panelis.image = self.attels
+        self.panelis.place(x=110, y=70, width=630, height=466)
+
+
+        self.mainthread = threading.Timer(1, self.readvideo)
+
+        try:
+            if (camid == "Video"):
+                if (vidname == ""):
+                    tkinter.messagebox.showerror(title="Kļūda",
+                                                 message="Lūdzu izvēlieties \"Video\" opciju, lai importētu video failu")
+                    return
+
+                self.mainig2 = cv2.VideoCapture(vidname)
+
+            else:
+
+                self.mainig2 = cv2.VideoCapture(int(camid[-1]))
+
+
+            self.destroyEvent = threading.Event()
+
+            self.option1.configure(state="disabled")
+            self.buttonStart.configure(state="disabled")
+            self.impVideo.configure(state="disabled")
+            self.buttonStop.configure(state='normal')
+
+            self.mainthread.start()
+        except:
+            print("error")
+
+    def stopVideo(self):
+        if 1:
+            self.destroyEvent.set()
+            time.sleep(2.0)
+            self.mainig2.release()
+            self.mainthread = None
+            self.mainthread = threading.Timer(1, self.readvideo)
+            self.fr2 = None
+            self.panelis = tki.Label(image=self.attels)
+            self.panelis.image = self.attels
+            self.panelis.place(x=110, y=70, width=630, height=466)
+            self.panelis = None
+
+            self.buttonStop.configure(state='disabled')
+            self.option1.configure(state="normal")
+            self.buttonStart.configure(state="normal")
+            self.impVideo.configure(state="normal")
+
+    def OpenFile(self):
+        global vidname
+        camid = self.option1.get()
+        if (camid != "Video"):
+            tkinter.messagebox.showerror(title="Kļūda",
+                                         message="Lūdzu izvēlieties \"Video\" opciju, lai importētu video failu")
+            return
+
+        vidname = askopenfilename(initialdir="Video/", filetypes=(("Video Fails", "*.mp4"), ("All Files", "*.*")),
+                                  title="Izvēlieties faila nosaukumu")
+
+    def readvideo(self):
+
+        global counter, Sar_main, rezultfin, laiks_1, t1, t2, Saraksts_2
+
+        try:
+            while not self.destroyEvent.is_set():
+
+                ret, self.fr2 = self.mainig2.read()
+                Att_Out = self.fr2.copy()
+                hands, self.fr2 = rokas_parbaude.findHands(self.fr2)
+                self.fr2 = cv2.resize(self.fr2, (700, 466))
+
+                if hands:
+                    hand = hands[0]
+
+                    x, y, w, h = hand['bbox']
+
+                    Pirkstu_Sar = hand["lmList"]
+                    fingers = rokas_parbaude.fingersUp(hand)
+                    pirksts = Pirkstu_Sar[8][0], Pirkstu_Sar[8][1]
+
+
+                    if fingers == [0, 1, 0, 0, 0]:
+                        if Saraksts_2 is False:
+                            Saraksts_2 = True
+                            t1 = datetime.now()
+
+                            Sar_main += 1
+                            Saraksts_1.append([])
+                            t2 = datetime.now()
+                            laiks_2 = 0
+                        if (len(Saraksts_1) > 0):
+                            Saraksts_1[Sar_main].append(pirksts)
+                            cv2.circle(Att_Out, pirksts, 12, (0, 0, 255), cv2.FILLED)
+
+                    elif (type(t2) == type(None) or laiks_2 > 3):
+                        Saraksts_2 = False
+                        t2 = None
+
+                        attels_klasifikacijai = np.ones((attela_robezas, attela_robezas, 3), np.uint8) * 255
+                        imgCrop = self.fr2[y - nobide:y + h + nobide, x - nobide:x + w + nobide]
+
+
+
+                        aspectRatio = h / w
+
+                        if aspectRatio > 1:
+                            k = attela_robezas / h
+                            wCal = math.ceil(k * w)
+                            imgResize = cv2.resize(imgCrop, (wCal, attela_robezas))
+                            wGap = math.ceil((attela_robezas - wCal) / 2)
+                            attels_klasifikacijai[:, wGap:wCal + wGap] = imgResize
+                            prediction, index = klasifikacija.getPrediction(attels_klasifikacijai, draw=False)
+                            print(prediction, index)
+
+                        else:
+                            k = attela_robezas / w
+                            hCal = math.ceil(k * h)
+                            imgResize = cv2.resize(imgCrop, (attela_robezas, hCal))
+                            hGap = math.ceil((attela_robezas - hCal) / 2)
+                            attels_klasifikacijai[hGap:hCal + hGap, :] = imgResize
+                            prediction, index = klasifikacija.getPrediction(attels_klasifikacijai, draw=False)
+
+                        cv2.rectangle(Att_Out, (x - nobide, y - nobide - 50),
+                                      (x - nobide + 90, y - nobide - 50 + 50), (255, 0, 255),
+                                      cv2.FILLED)
+                        cv2.putText(Att_Out, burtu_nosaukumi[index], (x, y - 26),
+                                    cv2.FONT_HERSHEY_COMPLEX, 1.7, (255, 255, 255), 2)
+                        cv2.rectangle(Att_Out, (x - nobide, y - nobide),
+                                      (x + w + nobide, y + h + nobide), (255, 0, 255), 4)
+
+                        burtu_rez[burtu_nosaukumi[index]]["score"] += 1
+                        burtu_rez[burtu_nosaukumi[index]]["x_pos"].append(x)
+                        burtu_rez[burtu_nosaukumi[index]]["y_pos"].append(y)
+
+                        counter += 1
+
+
+                        if counter % 30 == 0:
+
+
+                            res = OrderedDict(
+                                sorted(burtu_rez.items(),
+                                       key=lambda x: getitem(x[1], 'score'),
+                                       reverse=True))
+                            predicted_class = list(res.keys())[0]
+
+
+                            cv2.rectangle(Att_Out, (x - nobide, y - nobide - 50),
+                                          (x - nobide + 90, y - nobide - 50 + 50), (255, 0, 255),
+                                          cv2.FILLED)
+
+                            cv2.putText(Att_Out, burtu_nos[index], (x, y - 26),
+                                        cv2.FONT_HERSHEY_COMPLEX, 1.7, (255, 255, 255), 2)
+                            cv2.rectangle(Att_Out, (x - nobide, y - nobide),
+                                          (x + w + nobide, y + h + nobide), (255, 0, 255), 4)
+
+
+                            if predicted_class in spec_burti.keys():
+
+                                if burtu_rez[predicted_class]["x_pos"][0] - 20 > burtu_rez[
+                                    predicted_class]["x_pos"][-1]:
+                                    rezultfin += spec_burti[predicted_class]
+
+                                elif burtu_rez[predicted_class]["y_pos"][0] - 20 > burtu_rez[
+                                    predicted_class]["y_pos"][-1]:
+                                    rezultfin += spec_burti[predicted_class]
+
+                                elif burtu_rez[predicted_class]["y_pos"][0] - 20 > burtu_rez[
+                                    predicted_class]["y_pos"][-1] and predicted_class == "C":
+                                    rezultfin += spec_burti[predicted_class]
+
+                                elif burtu_rez[predicted_class]["y_pos"][0] < burtu_rez[
+                                    predicted_class]["y_pos"][-1] and predicted_class == "G":
+                                    rezultfin += spec_burti[predicted_class]
+
+                                elif burtu_rez[predicted_class]["y_pos"][0] < burtu_rez[
+                                    predicted_class]["y_pos"][-1] and predicted_class == "K":
+                                    rezultfin += spec_burti[predicted_class]
+
+
+
+                                else:
+                                    rezultfin += predicted_class
+                            else:
+                                # print("B")
+                                rezultfin += predicted_class
+
+                            print("\n\n\n\n", rezultfin, burtu_rez, "\n\n\n\n")
+
+                            if rezultfin == "DELETE_GEST":
+                                print("done")
+
+
+                                self.Printed_Text.delete("end-2c",END)
+                                rezultfin = ""
+
+                            if rezultfin == "SPACE":
+                                self.Printed_Text.insert(tki.END, " ")
+                                rezultfin = ""
+
+
+                            self.Printed_Text.insert(tki.END, rezultfin)
+                            rezultfin= ""
+                            #print(prediction)
+
+                            burtu_rez["A"]["score"] = 0
+                            burtu_rez["B"]["score"] = 0
+                            burtu_rez["C"]["score"] = 0
+                            burtu_rez["E"]["score"] = 0
+                            burtu_rez["F"]["score"] = 0
+                            burtu_rez["G"]["score"] = 0
+                            burtu_rez["I"]["score"] = 0
+                            burtu_rez["L"]["score"] = 0
+                            burtu_rez["N"]["score"] = 0
+                            burtu_rez["H"]["score"] = 0
+                            burtu_rez["M"]["score"] = 0
+                            burtu_rez["O"]["score"] = 0
+                            burtu_rez["P"]["score"] = 0
+                            burtu_rez["R"]["score"] = 0
+                            burtu_rez["U"]["score"] = 0
+                            burtu_rez["V"]["score"] = 0
+                            burtu_rez["Z"]["score"] = 0
+                            burtu_rez["K"]["score"] = 0
+                            burtu_rez["T"]["score"] = 0
+                            burtu_rez["SPACE"]["score"] = 0
+                            burtu_rez["DELETE_GEST"]["score"] = 0
+
+
+
+                            del burtu_rez["A"]["x_pos"]
+                            del burtu_rez["B"]["x_pos"]
+                            del burtu_rez["C"]["x_pos"]
+                            del burtu_rez["E"]["x_pos"]
+                            del burtu_rez["G"]["x_pos"]
+                            del burtu_rez["I"]["x_pos"]
+                            del burtu_rez["L"]["x_pos"]
+                            del burtu_rez["N"]["x_pos"]
+                            del burtu_rez["F"]["x_pos"]
+                            del burtu_rez["H"]["x_pos"]
+                            del burtu_rez["M"]["x_pos"]
+                            del burtu_rez["O"]["x_pos"]
+                            del burtu_rez["P"]["x_pos"]
+                            del burtu_rez["R"]["x_pos"]
+                            del burtu_rez["U"]["x_pos"]
+                            del burtu_rez["V"]["x_pos"]
+                            del burtu_rez["Z"]["x_pos"]
+                            del burtu_rez["K"]["x_pos"]
+                            del burtu_rez["T"]["x_pos"]
+                            del burtu_rez["SPACE"]["x_pos"]
+                            del burtu_rez["DELETE_GEST"]["x_pos"]
+
+                            del burtu_rez["A"]["y_pos"]
+                            del burtu_rez["B"]["y_pos"]
+                            del burtu_rez["C"]["y_pos"]
+                            del burtu_rez["E"]["y_pos"]
+                            del burtu_rez["G"]["y_pos"]
+                            del burtu_rez["I"]["y_pos"]
+                            del burtu_rez["L"]["y_pos"]
+                            del burtu_rez["N"]["y_pos"]
+                            del burtu_rez["F"]["y_pos"]
+                            del burtu_rez["H"]["y_pos"]
+                            del burtu_rez["M"]["y_pos"]
+                            del burtu_rez["O"]["y_pos"]
+                            del burtu_rez["P"]["y_pos"]
+                            del burtu_rez["R"]["y_pos"]
+                            del burtu_rez["U"]["y_pos"]
+                            del burtu_rez["V"]["y_pos"]
+                            del burtu_rez["Z"]["y_pos"]
+                            del burtu_rez["K"]["y_pos"]
+                            del burtu_rez["T"]["y_pos"]
+                            del burtu_rez["SPACE"]["y_pos"]
+                            del burtu_rez["DELETE_GEST"]["y_pos"]
+
+                            burtu_rez["A"]["x_pos"] = []
+                            burtu_rez["B"]["x_pos"] = []
+                            burtu_rez["C"]["x_pos"] = []
+                            burtu_rez["E"]["x_pos"] = []
+                            burtu_rez["G"]["x_pos"] = []
+                            burtu_rez["I"]["x_pos"] = []
+                            burtu_rez["L"]["x_pos"] = []
+                            burtu_rez["N"]["x_pos"] = []
+                            burtu_rez["F"]["x_pos"] = []
+                            burtu_rez["H"]["x_pos"] = []
+                            burtu_rez["M"]["x_pos"] = []
+                            burtu_rez["O"]["x_pos"] = []
+                            burtu_rez["P"]["x_pos"] = []
+                            burtu_rez["R"]["x_pos"] = []
+                            burtu_rez["U"]["x_pos"] = []
+                            burtu_rez["V"]["x_pos"] = []
+                            burtu_rez["Z"]["x_pos"] = []
+                            burtu_rez["K"]["x_pos"] = []
+                            burtu_rez["T"]["x_pos"] = []
+                            burtu_rez["SPACE"]["x_pos"] = []
+                            burtu_rez["DELETE_GEST"]["x_pos"] = []
+
+                            burtu_rez["A"]["y_pos"] = []
+                            burtu_rez["B"]["y_pos"] = []
+                            burtu_rez["C"]["y_pos"] = []
+                            burtu_rez["E"]["y_pos"] = []
+                            burtu_rez["G"]["y_pos"] = []
+                            burtu_rez["I"]["y_pos"] = []
+                            burtu_rez["L"]["y_pos"] = []
+                            burtu_rez["N"]["y_pos"] = []
+                            burtu_rez["F"]["y_pos"] = []
+                            burtu_rez["H"]["y_pos"] = []
+                            burtu_rez["M"]["y_pos"] = []
+                            burtu_rez["O"]["y_pos"] = []
+                            burtu_rez["P"]["y_pos"] = []
+                            burtu_rez["R"]["y_pos"] = []
+                            burtu_rez["U"]["y_pos"] = []
+                            burtu_rez["V"]["y_pos"] = []
+                            burtu_rez["Z"]["y_pos"] = []
+                            burtu_rez["K"]["y_pos"] = []
+                            burtu_rez["T"]["y_pos"] = []
+                            burtu_rez["SPACE"]["y_pos"] = []
+                            burtu_rez["DELETE_GEST"]["y_pos"] = []
+
+
+                    if (type(t2) != type(None)):
+                        laiks_2 = (datetime.now() - t2).total_seconds()
+                    
+                elif type(t1) != type(None):
+                    laiks_1 = (datetime.now() - t1).total_seconds()
+
+
+
+                for i in range(len(Saraksts_1)):
+                    for j in range(len(Saraksts_1[i])):
+                        if j != 0:
+                            cv2.line(Att_Out, Saraksts_1[i][j - 1], Saraksts_1[i][j],
+                                     (0, 0, 200), 12)
+
+                if laiks_1 > 5 and Saraksts_2:
+
+                    att1 = crop_img(Att_Out)
+                    if type(att1) != type(None):
+                        att1 = att1 / 255.0
+
+                        att2 = [att1]
+                        att2 = np.array(att2)
+
+                        pre1 = loaded_model.predict(att2)
+                        predicted_classes = np.argmax(pre1, axis=1)
+
+                        print(burt_rev[predicted_classes[0]])
+                        self.Printed_Text.insert(tki.END, burt_rev[predicted_classes[0]])
+                        laiks_1 = 0
+                        t1 = None
+                        Saraksts_2 = False
+                        Saraksts_1.clear()
+                        Sar_main = -1
+
+                importAtt = cv2.cvtColor(Att_Out, cv2.COLOR_BGR2RGB)
+                importAtt = Image.fromarray(importAtt)
+                importAtt = ImageTk.PhotoImage(importAtt)
+
+
+                if self.panelis is None:
+                    self.panelis = tki.Label(image=importAtt)
+                    self.panelis.image = importAtt
+                    self.panelis.place(x=110, y=70, width=630, height=466)
+
+
+                else:
+                    self.panelis.configure(image=importAtt)
+                    self.panelis.image = importAtt
+
+        except:
+            print("error")
+
+
+    def chooseCamera(self):
+
+        pirm = 0
+        na1 = ["Video"]
+        i = 10
+        while i > 0:
+            cap = cv2.VideoCapture(pirm)
+            if cap.read()[0]:
+                na1.append("Camera" + str(pirm))
+                cap.release()
+            pirm += 1
+            i -= 1
+        print(na1)
+        return na1
+
+
+myroot = Aplikacija_Class()
+myroot.root.mainloop()
